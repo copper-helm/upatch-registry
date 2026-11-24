@@ -21,8 +21,9 @@ upatches/
       Beefile          the package: name, license, upatch, tree entry, the CVE it fixes
       <name>.bpf.c     the BPF program
       README.md        the vulnerability, what the upatch blocks, side effects, sources
+      evidence/        evidence.toml: how it was tested and what it showed, plus small logs
 tools/
-  check                checks every entry's names, Beefile and license lines
+  check                checks every entry's names, Beefile, license lines and evidence
   compile              compiles every entry with clang 23 and the flags shirudo uses
   build                builds and signs packages with your shirudo key
 ```

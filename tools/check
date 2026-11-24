@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-2-Clause
 
+import datetime
 import os
 import pathlib
 import re
@@ -113,6 +114,120 @@ def check_readme(entry, cve, problems):
         problems.append("README.md needs a '## Sources' section")
 
 
+EVIDENCE = "evidence"
+EVIDENCE_FILE = "evidence.toml"
+EVIDENCE_TOP = {"schema", "summary", "environment", "matrix", "media", "logs"}
+ENV_REQUIRED = {"date", "kernel", "architecture", "target"}
+ENV_OPTIONAL = {"machine", "distribution", "shirudo"}
+ARCHITECTURES = {"x86_64", "aarch64", "riscv64"}
+STATES = ("before", "loaded", "after")
+MEDIA_KINDS = {"video", "image"}
+MEDIA_URL = re.compile(r"^(https://[A-Za-z0-9.-]+/|/media/)[A-Za-z0-9_./%-]+$")
+LOG_NAME = re.compile(r"^[A-Za-z0-9_.-]+\.(log|txt)$")
+LOG_MAX = 64 * 1024
+
+
+def short_text(value, limit):
+    return isinstance(value, str) and value.strip() != "" and len(value) <= limit
+
+
+def check_evidence(entry, problems):
+    folder = entry / EVIDENCE
+    path = folder / EVIDENCE_FILE
+    if not path.is_file():
+        problems.append(f"{EVIDENCE}/{EVIDENCE_FILE} is missing: record how the upatch was tested")
+        return
+    try:
+        ev = tomllib.loads(path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as err:
+        problems.append(f"{EVIDENCE}/{EVIDENCE_FILE}: {err}")
+        return
+    where = f"{EVIDENCE}/{EVIDENCE_FILE}"
+    for key in sorted(set(ev) - EVIDENCE_TOP):
+        problems.append(f"{where}: unknown key '{key}'")
+    if ev.get("schema") != 1:
+        problems.append(f"{where}: schema must be 1")
+    if not short_text(ev.get("summary"), 400):
+        problems.append(f"{where}: summary must be a sentence of at most 400 characters")
+
+    env = ev.get("environment")
+    if not isinstance(env, dict):
+        problems.append(f"{where}: [environment] is missing")
+    else:
+        for key in sorted(ENV_REQUIRED - set(env)):
+            problems.append(f"{where}: [environment] needs '{key}'")
+        for key in sorted(set(env) - ENV_REQUIRED - ENV_OPTIONAL):
+            problems.append(f"{where}: [environment] has unknown key '{key}'")
+        if "date" in env and not isinstance(env["date"], datetime.date):
+            problems.append(f"{where}: [environment] date must be a TOML date, such as 2026-11-24")
+        if "architecture" in env and env["architecture"] not in ARCHITECTURES:
+            problems.append(f"{where}: [environment] architecture must be one of {sorted(ARCHITECTURES)}")
+        for key in (ENV_REQUIRED | ENV_OPTIONAL) - {"date", "architecture"}:
+            if key in env and not short_text(env[key], 200):
+                problems.append(f"{where}: [environment] {key} must be text of at most 200 characters")
+
+    matrix = ev.get("matrix")
+    if not isinstance(matrix, dict):
+        problems.append(f"{where}: [matrix] is missing")
+    else:
+        columns = matrix.get("columns")
+        rows = matrix.get("rows")
+        if not isinstance(columns, list) or not 1 <= len(columns) <= 8 or not all(short_text(c, 80) for c in columns):
+            problems.append(f"{where}: [matrix] columns must be 1 to 8 labels of at most 80 characters")
+            columns = None
+        if not isinstance(rows, list) or not rows:
+            problems.append(f"{where}: [matrix] needs rows")
+        else:
+            seen = []
+            for row in rows:
+                state = row.get("state") if isinstance(row, dict) else None
+                if state not in STATES:
+                    problems.append(f"{where}: [matrix] row state must be one of {list(STATES)}")
+                    continue
+                if state in seen:
+                    problems.append(f"{where}: [matrix] state '{state}' appears twice")
+                seen.append(state)
+                values = row.get("values")
+                if columns and (not isinstance(values, list) or len(values) != len(columns)
+                                or not all(short_text(v, 80) for v in values)):
+                    problems.append(f"{where}: [matrix] row '{state}' needs one value of at most 80 characters per column")
+            if "loaded" not in seen:
+                problems.append(f"{where}: [matrix] needs a 'loaded' row")
+
+    for item in ev.get("media", []):
+        if not isinstance(item, dict) or item.get("kind") not in MEDIA_KINDS:
+            problems.append(f"{where}: [[media]] kind must be one of {sorted(MEDIA_KINDS)}")
+            continue
+        if not isinstance(item.get("url"), str) or not MEDIA_URL.match(item["url"]):
+            problems.append(f"{where}: [[media]] url must be an https URL or a /media/ path; media files are not committed")
+        if not short_text(item.get("caption"), 200):
+            problems.append(f"{where}: [[media]] needs a caption of at most 200 characters")
+
+    listed = {EVIDENCE_FILE}
+    for item in ev.get("logs", []):
+        name = item.get("file") if isinstance(item, dict) else None
+        if not isinstance(name, str) or not LOG_NAME.match(name):
+            problems.append(f"{where}: [[logs]] file must be a .log or .txt name inside {EVIDENCE}/")
+            continue
+        listed.add(name)
+        log = folder / name
+        if not log.is_file():
+            problems.append(f"{EVIDENCE}/{name} is listed but missing")
+            continue
+        if log.stat().st_size > LOG_MAX:
+            problems.append(f"{EVIDENCE}/{name} is larger than {LOG_MAX // 1024} KiB")
+        try:
+            log.read_bytes().decode("utf-8")
+        except UnicodeDecodeError:
+            problems.append(f"{EVIDENCE}/{name} is not UTF-8 text")
+        if not short_text(item.get("caption"), 200):
+            problems.append(f"{where}: [[logs]] needs a caption of at most 200 characters")
+
+    for child in sorted(folder.iterdir()):
+        if child.name not in listed:
+            problems.append(f"{EVIDENCE}/{child.name} is not evidence.toml or a listed log; keep exploit code and payloads out")
+
+
 def check_entry(entry):
     problems = []
     name = entry.name
@@ -159,6 +274,7 @@ def check_entry(entry):
         if "tree" in item:
             check_tree(upatch, item["tree"], cve, problems)
     check_readme(entry, cve, problems)
+    check_evidence(entry, problems)
     return problems
 
 

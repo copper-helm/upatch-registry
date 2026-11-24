@@ -6,12 +6,50 @@ Each pull request adds or changes one upatch.
 
 1. Pick the category. A Linux kernel CVE goes in `upatches/kernel-cve/`, a CVE in an application, mitigated at kernel hooks, in `upatches/app-cve/`.
 2. Name the entry: lowercase letters, digits and hyphens, at most 30 characters. A kernel-cve or app-cve entry starts with its CVE id, such as `cve-2026-12345-foo-block`. The directory, the package, the source file's base name and the tree id all use this name.
-3. Add three files:
+3. Add these files:
     - `Beefile`: `[package]` with `name`, `description` and `license = "GPL-2.0 OR BSD-2-Clause"`, one `[[upatches]]` with `source = "<name>.bpf.c"`, and `[upatches.tree]` with `id = "<name>"` and `fixes = ["CVE-YYYY-NNNNN"]`.
     - `<name>.bpf.c`: the BPF program.
     - `README.md`: the sections listed below.
+    - `evidence/evidence.toml`: how you tested it, described below.
 4. Run `tools/check` and `tools/compile <shirudo-checkout>`.
-5. Load the upatch on a shirudo test machine, show that it does what its README says, and unload it.
+5. Load the upatch on a shirudo test machine, show that it does what its README says, unload it, and record the result in `evidence/`.
+
+## Record the evidence
+
+`evidence/evidence.toml` records the test that step 5 asks for. upatch.dev shows it on the CVE's page, and `tools/check` refuses an entry without it.
+
+```toml
+schema = 1
+summary = "One or two sentences: what the test showed, and any limit of the test."
+
+[environment]
+date = 2026-11-24                 # a TOML date
+kernel = "7.4-shirudo-ci-20261123"
+architecture = "x86_64"           # x86_64, aarch64 or riscv64
+target = "What was attacked: the software, its version and the setting that makes it vulnerable"
+machine = "EC2 t3.large"          # optional
+distribution = "Ubuntu 26.04"     # optional
+shirudo = "154afeea"              # optional, the shirudo commit
+
+[matrix]
+columns = ["Exploit step blocked", "Normal use works"]   # 1 to 8 checks
+rows = [
+  { state = "before", values = ["no", "yes"] },
+  { state = "loaded", values = ["yes", "yes"] },          # required
+  { state = "after", values = ["no", "yes"] },
+]
+
+[[media]]                         # optional
+kind = "video"                    # video or image
+url = "https://..."               # an https URL or a /media/ path on upatch.dev
+caption = "What the recording shows."
+
+[[logs]]                          # optional, a .log or .txt file in evidence/, at most 64 KiB
+file = "test-matrix.log"
+caption = "What the log shows."
+```
+
+Only `evidence.toml` and the logs it lists may sit in `evidence/`. Media is linked, never committed. Exploit code, payloads and anything that triggers the bug stay out of the evidence as they stay out of the program.
 
 ## Write the program
 
