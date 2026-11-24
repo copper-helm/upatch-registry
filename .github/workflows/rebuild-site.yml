@@ -1,0 +1,41 @@
+name: Rebuild upatch.dev
+
+# upatch.dev is generated from this repository. Rebuild it when an entry is
+# merged, when a pull request that could show as "In review" changes, and once
+# a day so NVD data (scores, known-exploited flags) stays current.
+on:
+  push:
+    branches: [main]
+  pull_request_target:
+    types: [opened, reopened, synchronize, labeled, unlabeled, closed]
+    paths: ["upatches/**"]
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+# Only calls the deploy hooks: no checkout, so no pull request code runs here.
+permissions: {}
+
+concurrency:
+  group: rebuild-site
+  cancel-in-progress: true
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the Vercel deploy hooks
+        env:
+          SITE_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK_UPATCH_DEV }}
+          FEEDBACK_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK_UPATCH_FEEDBACK }}
+        run: |
+          called=0
+          for hook in "$SITE_HOOK" "$FEEDBACK_HOOK"; do
+            [ -n "$hook" ] || continue
+            curl -fsS -X POST -o /dev/null "$hook"
+            called=$((called + 1))
+          done
+          echo "Called $called deploy hook(s)."
+          if [ "$called" -eq 0 ]; then
+            echo "::warning::No deploy hook secrets are set; upatch.dev was not rebuilt."
+          fi
