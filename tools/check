@@ -17,6 +17,7 @@ SPDX_BPF = "// SPDX-License-Identifier: GPL-2.0 OR BSD-2-Clause"
 LICENSE = "GPL-2.0 OR BSD-2-Clause"
 BPF_LICENSE = re.compile(r'SEC\("license"\)\s*=\s*"Dual BSD/GPL"')
 TABLES = {"package", "files", "upatches"}
+CVE_CATEGORIES = {"kernel-cve", "app-cve"}
 MEMBER_PATH_MAX = 99
 VERSION_BUDGET = len("10.10.10")
 
@@ -118,12 +119,12 @@ def check_entry(entry):
     if not NAME.match(name):
         problems.append("the directory name must be 1 to 30 lowercase letters, digits and hyphens")
     cve = None
-    if entry.parent.name == "kernel-cve":
+    if entry.parent.name in CVE_CATEGORIES:
         match = CVE_NAME.match(name)
         if match:
             cve = match.group(1)
         else:
-            problems.append("a kernel-cve entry's name starts with its CVE id, such as cve-2026-12345-foo-block")
+            problems.append(f"a {entry.parent.name} entry's name starts with its CVE id, such as cve-2026-12345-foo-block")
     links = []
     check_links(entry, links)
     if links:
