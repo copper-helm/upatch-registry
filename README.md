@@ -8,6 +8,7 @@ Each entry is a package directory. You build it, sign it with your own shirudo k
 
 | Upatch | Fixes | What it does |
 | --- | --- | --- |
+| [cve-2026-99350-rxrpc-block](upatches/kernel-cve/cve-2026-99350-rxrpc-block) | CVE-2026-99350 | Refuses new RxRPC sockets |
 
 ## Layout
 
