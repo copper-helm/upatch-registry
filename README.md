@@ -1,6 +1,6 @@
 # upatch-registry
 
-Source packages of [shirudo](https://github.com/shirudo-dev/shirudo) upatches: small signed BPF programs that block or detect a vulnerable Linux kernel path until a machine gets the kernel fix.
+Source packages of [shirudo](https://github.com/shirudo-dev/shirudo) upatches: small signed BPF programs that block or detect a vulnerable path, in the Linux kernel or in an application, until a machine gets the fix.
 
 Each entry is a package directory. You build it, sign it with your own shirudo key and publish it to your own OCI registry. Your machines then pull it like any other upatch.
 
@@ -9,12 +9,14 @@ Each entry is a package directory. You build it, sign it with your own shirudo k
 | Upatch | Fixes | What it does |
 | --- | --- | --- |
 | [cve-2026-99350-rxrpc-block](upatches/kernel-cve/cve-2026-99350-rxrpc-block) | CVE-2026-99350 | Refuses new RxRPC sockets |
+| [cve-2025-24813-tomcat-block](upatches/app-cve/cve-2025-24813-tomcat-block) | CVE-2025-24813 | Refuses the Apache Tomcat partial PUT session file write and load |
 
 ## Layout
 
 ```
 upatches/
   kernel-cve/          mitigations and detectors for Linux kernel CVEs
+  app-cve/             mitigations for CVEs in applications, enforced at kernel hooks
     <name>/
       Beefile          the package: name, license, upatch, tree entry, the CVE it fixes
       <name>.bpf.c     the BPF program

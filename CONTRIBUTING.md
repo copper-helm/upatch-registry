@@ -4,8 +4,8 @@ Each pull request adds or changes one upatch.
 
 ## Add a upatch
 
-1. Pick the category. A Linux kernel CVE goes in `upatches/kernel-cve/`.
-2. Name the entry: lowercase letters, digits and hyphens, at most 30 characters. A kernel-cve entry starts with its CVE id, such as `cve-2026-12345-foo-block`. The directory, the package, the source file's base name and the tree id all use this name.
+1. Pick the category. A Linux kernel CVE goes in `upatches/kernel-cve/`, a CVE in an application, mitigated at kernel hooks, in `upatches/app-cve/`.
+2. Name the entry: lowercase letters, digits and hyphens, at most 30 characters. A kernel-cve or app-cve entry starts with its CVE id, such as `cve-2026-12345-foo-block`. The directory, the package, the source file's base name and the tree id all use this name.
 3. Add three files:
     - `Beefile`: `[package]` with `name`, `description` and `license = "GPL-2.0 OR BSD-2-Clause"`, one `[[upatches]]` with `source = "<name>.bpf.c"`, and `[upatches.tree]` with `id = "<name>"` and `fixes = ["CVE-YYYY-NNNNN"]`.
     - `<name>.bpf.c`: the BPF program.
