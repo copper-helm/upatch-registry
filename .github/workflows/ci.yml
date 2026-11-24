@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  SHIRUDO_REF: 154afeea5de9e2d5d35e8b6e1fd5baead2640471
+
+jobs:
+  check:
+    name: Check entries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - run: python3 tools/check
+
+  compile:
+    name: Compile with clang 23
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: shirudo-dev/shirudo
+          ref: ${{ env.SHIRUDO_REF }}
+          path: .shirudo
+          persist-credentials: false
+      - run: sudo sh .shirudo/.github/scripts/install-clang.sh
+      - run: tools/compile .shirudo

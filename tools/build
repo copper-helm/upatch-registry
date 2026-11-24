@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: BSD-2-Clause
+
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+shirudo_bin=${SHIRUDO:-shirudo}
+
+die()
+{
+	printf 'build: %s\n' "$*" >&2
+	exit 1
+}
+
+usage="usage: tools/build <shirudo-checkout> <keys-dir> <version> <entry-dir>..."
+[ $# -ge 4 ] || die "$usage"
+shirudo=$(cd "$1" && pwd)
+keys=$(cd "$2" && pwd)
+version=$3
+shift 3
+
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "'$version' is not <major>.<minor>.<patch>"
+[ -r "$keys/cert.der" ] || die "$keys holds no cert.der"
+command -v "$shirudo_bin" >/dev/null || die "no $shirudo_bin on PATH: set SHIRUDO"
+
+out=$root/build/packages
+mkdir -p "$out"
+stage=$(mktemp -d)
+trap 'rm -rf -- "$stage"' EXIT
+
+for entry in "$@"; do
+	entry=$(cd "$entry" && pwd)
+	name=$(basename "$entry")
+	cp -R "$entry" "$stage/$name"
+	ln -s "$shirudo/vendor" "$stage/$name/vendor"
+	[ ! -d "$shirudo/bpf" ] || ln -s "$shirudo/bpf" "$stage/$name/bpf"
+	(cd "$out" && "$shirudo_bin" bpm build "$stage/$name" --version "$version" --keys-dir "$keys")
+done

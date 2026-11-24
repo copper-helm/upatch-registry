@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: BSD-2-Clause
+
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+clang=${CLANG:-clang}
+
+die()
+{
+	printf 'compile: %s\n' "$*" >&2
+	exit 1
+}
+
+[ $# -ge 1 ] || die "usage: tools/compile <shirudo-checkout> [<entry-dir>...]"
+shirudo=$(cd "$1" && pwd)
+shift
+vmlinux_dir=${VMLINUX_DIR:-$shirudo/upatches/kernel-cve}
+
+[ -r "$vmlinux_dir/vmlinux.h" ] || die "no vmlinux.h in $vmlinux_dir: set VMLINUX_DIR"
+[ -r "$shirudo/vendor/libbpf/bpf/bpf_helpers.h" ] || die "$shirudo is not a shirudo checkout"
+version=$("$clang" --version 2>/dev/null) || die "no $clang: set CLANG"
+[[ "$version" == *"version 23."* ]] || die "$clang is not clang 23: set CLANG"
+
+if [ $# -eq 0 ]; then
+	set --
+	for beefile in "$root"/upatches/*/*/Beefile; do
+		[ -e "$beefile" ] && set -- "$@" "$(dirname "$beefile")"
+	done
+fi
+
+out=$root/build/compile
+compiled=0
+for entry in "$@"; do
+	entry=$(cd "$entry" && pwd)
+	name=$(basename "$entry")
+	mkdir -p "$out/$name"
+	while IFS= read -r source; do
+		printf 'compile %s/%s\n' "$name" "$source"
+		"$clang" -target bpf -mcpu=v4 -fno-jump-tables -O2 -g \
+			-Wall -Wextra -Wshadow -Wtype-limits \
+			-Wno-missing-declarations -Wno-unused-parameter -Werror \
+			-I"$vmlinux_dir" -I"$shirudo/vendor/libbpf" -I"$shirudo/bpf/lib" \
+			-c "$entry/$source" -o "$out/$name/${source%.c}.o"
+		compiled=$((compiled + 1))
+	done < <(python3 -c '
+import sys, tomllib
+with open(sys.argv[1], "rb") as f:
+    for item in tomllib.load(f).get("upatches", []):
+        print(item["source"])
+' "$entry/Beefile")
+done
+printf '%d sources compiled\n' "$compiled"

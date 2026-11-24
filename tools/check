@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: BSD-2-Clause
+
+import pathlib
+import re
+import sys
+import tomllib
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+UPATCHES = ROOT / "upatches"
+NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,29}$")
+CVE_NAME = re.compile(r"^(cve-\d{4}-\d{4,})(-[a-z0-9-]+)?$")
+ADVISORY = re.compile(r"^[A-Za-z0-9._:-]{1,255}$")
+SPDX_BPF = "// SPDX-License-Identifier: GPL-2.0 OR BSD-2-Clause"
+LICENSE = "GPL-2.0 OR BSD-2-Clause"
+BPF_LICENSE = re.compile(r'SEC\("license"\)\s*=\s*"Dual BSD/GPL"')
+MEMBER_PATH_MAX = 99
+VERSION_BUDGET = len("10.10.10")
+
+
+def entries():
+    if not UPATCHES.is_dir():
+        return []
+    return sorted(p.parent for p in UPATCHES.glob("*/*/Beefile"))
+
+
+def check_source(entry, source, problems):
+    path = entry / source
+    if not path.is_file():
+        problems.append(f"source {source} is missing")
+        return None
+    if not source.endswith(".bpf.c"):
+        problems.append(f"source {source} is not a .bpf.c file")
+        return None
+    text = path.read_text(encoding="utf-8")
+    if text.splitlines()[:1] != [SPDX_BPF]:
+        problems.append(f"{source}: the first line must be '{SPDX_BPF}'")
+    if not BPF_LICENSE.search(text):
+        problems.append(f'{source}: declare char _license[] SEC("license") = "Dual BSD/GPL";')
+    return source[: -len(".bpf.c")]
+
+
+def check_tree(upatch, tree, cve, problems):
+    if tree.get("id") != upatch:
+        problems.append(f"[upatches.tree] id must be '{upatch}', the source's base name")
+    fixes = tree.get("fixes")
+    if fixes is None:
+        if cve:
+            problems.append(f"[upatches.tree] fixes must list {cve.upper()}")
+        return
+    if not isinstance(fixes, list) or not 1 <= len(fixes) <= 16:
+        problems.append("[upatches.tree] fixes must be a list of 1 to 16 IDs")
+        return
+    if len(set(fixes)) != len(fixes):
+        problems.append("[upatches.tree] fixes lists an ID twice")
+    for advisory in fixes:
+        if not isinstance(advisory, str) or not ADVISORY.match(advisory):
+            problems.append(f"[upatches.tree] fixes holds a malformed ID: {advisory!r}")
+    if cve and cve.upper() not in fixes:
+        problems.append(f"[upatches.tree] fixes must list {cve.upper()}")
+
+
+def check_entry(entry):
+    problems = []
+    name = entry.name
+    category = entry.parent.name
+    if not NAME.match(name):
+        problems.append("the directory name must be 1 to 30 lowercase letters, digits and hyphens")
+    cve = None
+    if category == "kernel-cve":
+        match = CVE_NAME.match(name)
+        if match:
+            cve = match.group(1)
+        else:
+            problems.append("a kernel-cve entry's name starts with its CVE id, such as cve-2026-12345-foo-block")
+    try:
+        beefile = tomllib.loads((entry / "Beefile").read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as err:
+        return [f"Beefile: {err}"]
+    package = beefile.get("package", {})
+    if package.get("name") != name:
+        problems.append(f"[package] name must be '{name}', the directory name")
+    if not package.get("description"):
+        problems.append("[package] needs a description")
+    if package.get("license") != LICENSE:
+        problems.append(f"[package] license must be '{LICENSE}'")
+    upatches = beefile.get("upatches", [])
+    if not upatches:
+        problems.append("the Beefile names no [[upatches]]")
+    for item in upatches:
+        source = item.get("source", "")
+        upatch = check_source(entry, source, problems)
+        if upatch is None:
+            continue
+        member = f"{name}-{'v' * VERSION_BUDGET}/upatches/{upatch}.unload.upatch"
+        if len(member) > MEMBER_PATH_MAX:
+            problems.append(f"{upatch}: the package and upatch names are too long for a {VERSION_BUDGET}-character version")
+        if "tree" in item:
+            check_tree(upatch, item["tree"], cve, problems)
+    readme = entry / "README.md"
+    if not readme.is_file():
+        problems.append("README.md is missing")
+    else:
+        text = readme.read_text(encoding="utf-8")
+        if cve and cve.upper() not in text:
+            problems.append(f"README.md never names {cve.upper()}")
+        if not re.search(r"^## Sources\s*$", text, re.MULTILINE):
+            problems.append("README.md needs a '## Sources' section")
+    return problems
+
+
+def main():
+    found = entries()
+    failed = 0
+    for entry in found:
+        for problem in check_entry(entry):
+            print(f"{entry.relative_to(ROOT)}: {problem}")
+            failed += 1
+    print(f"{len(found)} entries checked, {failed} problems")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
