@@ -22,6 +22,7 @@ shift 3
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "'$version' is not <major>.<minor>.<patch>"
 [ -r "$keys/cert.der" ] || die "$keys holds no cert.der"
 command -v "$shirudo_bin" >/dev/null || die "no $shirudo_bin on PATH: set SHIRUDO"
+python3 "$root/tools/check" "$@" || die "fix the problems above before building"
 
 out=$root/build/packages
 mkdir -p "$out"

@@ -29,6 +29,8 @@ if [ $# -eq 0 ]; then
 	done
 fi
 
+python3 "$root/tools/check" "$@" || die "fix the problems above before compiling"
+
 out=$root/build/compile
 compiled=0
 for entry in "$@"; do
