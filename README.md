@@ -4,6 +4,25 @@ Source packages of [shirudo](https://github.com/shirudo-dev/shirudo) upatches: s
 
 Each CVE has one package directory, `upatches/<cve-id>/`. You build it, sign it with your own shirudo key and publish it to your own OCI registry. Your machines then pull it like any other upatch.
 
+## Browse it on upatch.dev
+
+[upatch.dev](https://upatch.dev) is the index of this registry. Every CVE here has a page at `https://upatch.dev/cve/<CVE-ID>`, such as [CVE-2025-24813](https://upatch.dev/cve/CVE-2025-24813). It shows:
+
+- the vulnerability, with its CVSS severity, its EPSS score and whether CISA lists it as known exploited
+- what the upatch blocks, its side effects and the software versions it covers
+- the BPF source, the Beefile and the README
+- how the upatch was tested and what the test showed
+- who wrote and reviewed it
+- the commands to build and publish it
+
+[upatch.dev/cves](https://upatch.dev/cves) lists every CVE. You can search it by CVE ID, software or upatch, and filter by kernel or application, status and severity.
+
+The site follows this repository within seconds. When a change lands on `main`, its CVE's page is added or updated. An open pull request from a maintainer, or one labelled `show-on-site`, shows on its CVE's page as "In review". [rebuild-site.yml](.github/workflows/rebuild-site.yml) tells the site to read the registry again.
+
+Every CVE page also has a Markdown version at `https://upatch.dev/cve/<CVE-ID>.md`. The site serves an RSS feed of new upatches at [/feed.xml](https://upatch.dev/feed.xml) and a guide for AI agents at [/llms.txt](https://upatch.dev/llms.txt).
+
+upatch.dev is an open-source community initiative sponsored by [Copperhelm](https://copperhelm.com). It is not part of shirudo. A upatch holds the line until the real fix ships; it does not replace patching.
+
 ## Layout
 
 ```
