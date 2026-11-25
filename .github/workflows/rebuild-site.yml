@@ -1,8 +1,5 @@
 name: Rebuild upatch.dev
 
-# upatch.dev is generated from this repository. Rebuild it when an entry is
-# merged, when a pull request that could show as "In review" changes, and once
-# a day so NVD data (scores, known-exploited flags) stays current.
 on:
   push:
     branches: [main]
@@ -13,7 +10,6 @@ on:
     - cron: "17 5 * * *"
   workflow_dispatch:
 
-# Only calls the deploy hooks: no checkout, so no pull request code runs here.
 permissions: {}
 
 concurrency:
@@ -22,6 +18,11 @@ concurrency:
 
 jobs:
   rebuild:
+    if: >-
+      github.event_name != 'pull_request_target' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
+      contains(github.event.pull_request.labels.*.name, 'show-on-site') ||
+      (github.event.action == 'unlabeled' && github.event.label.name == 'show-on-site')
     runs-on: ubuntu-latest
     steps:
       - name: Call the Vercel deploy hooks
@@ -29,13 +30,17 @@ jobs:
           SITE_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK_UPATCH_DEV }}
           FEEDBACK_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK_UPATCH_FEEDBACK }}
         run: |
-          called=0
-          for hook in "$SITE_HOOK" "$FEEDBACK_HOOK"; do
-            [ -n "$hook" ] || continue
-            curl -fsS -X POST -o /dev/null "$hook"
-            called=$((called + 1))
+          failed=0
+          for pair in "upatch-dev:$SITE_HOOK" "upatch-feedback:$FEEDBACK_HOOK"; do
+            name=${pair%%:*}
+            hook=${pair#*:}
+            if [ -z "$hook" ]; then
+              echo "::warning::No deploy hook secret for $name, so it was not rebuilt."
+            elif curl -fsS -X POST -o /dev/null "$hook"; then
+              echo "Rebuilt $name."
+            else
+              echo "::error::The deploy hook of $name failed."
+              failed=1
+            fi
           done
-          echo "Called $called deploy hook(s)."
-          if [ "$called" -eq 0 ]; then
-            echo "::warning::No deploy hook secrets are set; upatch.dev was not rebuilt."
-          fi
+          exit "$failed"
