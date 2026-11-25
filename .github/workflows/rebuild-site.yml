@@ -1,0 +1,46 @@
+name: Rebuild upatch.dev
+
+on:
+  push:
+    branches: [main]
+  pull_request_target:
+    types: [opened, reopened, synchronize, labeled, unlabeled, closed]
+    paths: ["upatches/**"]
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: rebuild-site
+  cancel-in-progress: true
+
+jobs:
+  rebuild:
+    if: >-
+      github.event_name != 'pull_request_target' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
+      contains(github.event.pull_request.labels.*.name, 'show-on-site') ||
+      (github.event.action == 'unlabeled' && github.event.label.name == 'show-on-site')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the Vercel deploy hooks
+        env:
+          SITE_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK_UPATCH_DEV }}
+          FEEDBACK_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK_UPATCH_FEEDBACK }}
+        run: |
+          failed=0
+          for pair in "upatch-dev:$SITE_HOOK" "upatch-feedback:$FEEDBACK_HOOK"; do
+            name=${pair%%:*}
+            hook=${pair#*:}
+            if [ -z "$hook" ]; then
+              echo "::warning::No deploy hook secret for $name, so it was not rebuilt."
+            elif curl -fsS -X POST -o /dev/null "$hook"; then
+              echo "Rebuilt $name."
+            else
+              echo "::error::The deploy hook of $name failed."
+              failed=1
+            fi
+          done
+          exit "$failed"
