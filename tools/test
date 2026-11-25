@@ -12,12 +12,19 @@ die()
 	exit 1
 }
 
-[ $# -ge 1 ] || die "usage: tools/test <cve-id>-<version>.bee..."
+with_setup=0
+if [ "${1:-}" = --setup ]; then
+	with_setup=1
+	shift
+fi
+[ $# -ge 1 ] || die "usage: tools/test [--setup] <cve-id>-<version>.bee..."
 [ "$(id -u)" -eq 0 ] || die "run it as root on a shirudo test machine"
 command -v "$shirudo" >/dev/null || die "no $shirudo: set SHIRUDO to the trusted runtime binary"
 
 stage=$(mktemp -d)
 loaded=()
+payload_env=()
+teardown_program=
 
 unload_all()
 {
@@ -29,9 +36,19 @@ unload_all()
 	loaded=()
 }
 
+run_teardown()
+{
+	[ -n "$teardown_program" ] || return 0
+	timeout 600 "$teardown_program" >>"$stage/setup.log" 2>&1 ||
+		printf 'test: %s failed, see %s\n' "$teardown_program" "$stage/setup.log" >&2
+	teardown_program=
+	payload_env=()
+}
+
 cleanup()
 {
 	unload_all
+	run_teardown
 	rm -rf -- "$stage"
 }
 trap cleanup EXIT
@@ -39,7 +56,7 @@ trap cleanup EXIT
 probe()
 {
 	local state=$1 payload=$2 output status=0
-	output=$("$payload" 2>&1) || status=$?
+	output=$(env "${payload_env[@]}" "$payload" 2>&1) || status=$?
 	case $status in
 	0) result=reached ;;
 	10) result=blocked ;;
@@ -48,6 +65,20 @@ probe()
 	esac
 	output=${output%%$'\n'*}
 	printf '  %-7s %-12s %s\n' "$state" "$result" "${output#"$result: "}"
+}
+
+setup_vulnerable()
+{
+	local cve=$1 output line
+	teardown_program=$root/payloads/$cve/teardown
+	if ! output=$(timeout "${SETUP_TIMEOUT:-1200}" "$root/payloads/$cve/setup" 2>>"$stage/setup.log"); then
+		printf '  FAIL: setup failed: %s\n' "$(tail -n 1 "$stage/setup.log")"
+		return 1
+	fi
+	while IFS= read -r line; do
+		[[ "$line" =~ ^[A-Z][A-Z0-9_]*= ]] && payload_env+=("$line")
+	done <<<"$output"
+	printf '  %-7s %-12s %s\n' setup done "${payload_env[*]:-no settings}"
 }
 
 test_package()
@@ -67,6 +98,9 @@ test_package()
 	[ ${#upatches[@]} -gt 0 ] || die "$file holds no upatch"
 
 	printf '%s\n' "$cve"
+	if [ "$with_setup" = 1 ] && [ -x "$root/payloads/$cve/setup" ]; then
+		setup_vulnerable "$cve" || return 1
+	fi
 	probe before "$payload"
 	before=$result
 	for upatch in "${upatches[@]}"; do
@@ -102,5 +136,6 @@ failed=0
 for bee in "$@"; do
 	[ -r "$bee" ] || die "no package at $bee"
 	test_package "$bee" || failed=1
+	run_teardown
 done
 exit "$failed"
