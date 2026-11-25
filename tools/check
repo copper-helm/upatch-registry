@@ -34,7 +34,8 @@ LOG_NAME = re.compile(r"^[A-Za-z0-9_.-]+\.(log|txt)$")
 LOG_MAX = 64 * 1024
 
 PAYLOADS = ROOT / "payloads"
-PAYLOAD_FILES = {"payload", "README.md"}
+PAYLOAD_FILES = {"payload", "README.md", "setup", "teardown"}
+PAYLOAD_PROGRAMS = ("payload", "setup", "teardown")
 PAYLOAD_MAX = 64 * 1024
 
 
@@ -316,22 +317,23 @@ def check_evidence(entry, problems):
             problems.append(f"{EVIDENCE}/{child.name} is not evidence.toml or a listed log; a payload goes in payloads/<cve-id>/")
 
 
-def check_payload_program(payload, where, problems):
-    if not os.access(payload, os.X_OK):
-        problems.append(f"{where}/payload is not executable")
-    if payload.stat().st_size > PAYLOAD_MAX:
-        problems.append(f"{where}/payload is larger than {PAYLOAD_MAX // 1024} KiB")
-    text = read_text(payload, f"{where}/payload", problems)
+def check_payload_program(program, where, problems):
+    label = f"{where}/{program.name}"
+    if not os.access(program, os.X_OK):
+        problems.append(f"{label} is not executable")
+    if program.stat().st_size > PAYLOAD_MAX:
+        problems.append(f"{label} is larger than {PAYLOAD_MAX // 1024} KiB")
+    text = read_text(program, label, problems)
     if text is None:
         return
     first = text.splitlines()[:1]
     if not first or not first[0].startswith("#!"):
-        problems.append(f"{where}/payload must start with a #! line that names its interpreter")
+        problems.append(f"{label} must start with a #! line that names its interpreter")
     elif "python" in first[0]:
         try:
-            compile(text, str(payload), "exec")
+            compile(text, str(program), "exec")
         except SyntaxError as err:
-            problems.append(f"{where}/payload: {err.msg} on line {err.lineno}")
+            problems.append(f"{label}: {err.msg} on line {err.lineno}")
 
 
 def check_payload(cve, problems):
@@ -347,12 +349,15 @@ def check_payload(cve, problems):
         return
     for child in sorted(folder.iterdir()):
         if child.name not in PAYLOAD_FILES:
-            problems.append(f"{where}/{child.name}: a payload directory holds only payload and README.md")
-    payload = folder / "payload"
-    if payload.is_file():
-        check_payload_program(payload, where, problems)
-    else:
-        problems.append(f"{where}/payload is missing")
+            problems.append(f"{where}/{child.name}: a payload directory holds only payload, setup, teardown and README.md")
+    for name in PAYLOAD_PROGRAMS:
+        program = folder / name
+        if program.is_file():
+            check_payload_program(program, where, problems)
+        elif name == "payload":
+            problems.append(f"{where}/payload is missing")
+    if (folder / "setup").is_file() != (folder / "teardown").is_file():
+        problems.append(f"{where}: setup and teardown come together")
     readme = folder / "README.md"
     if not readme.is_file():
         problems.append(f"{where}/README.md is missing")

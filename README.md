@@ -4,13 +4,6 @@ Source packages of [shirudo](https://github.com/shirudo-dev/shirudo) upatches: s
 
 Each CVE has one package directory, `upatches/<cve-id>/`. You build it, sign it with your own shirudo key and publish it to your own OCI registry. Your machines then pull it like any other upatch.
 
-## Upatches
-
-| CVE | Upatch | What it does |
-| --- | --- | --- |
-| [CVE-2026-99350](upatches/cve-2026-99350) | `cve-2026-99350-rxrpc-block` | Refuses new RxRPC sockets |
-| [CVE-2025-24813](upatches/cve-2025-24813) | `cve-2025-24813-tomcat-block` | Refuses the Apache Tomcat partial PUT session file write and load |
-
 ## Layout
 
 ```
@@ -23,6 +16,7 @@ upatches/
 payloads/
   <cve-id>/                 the same CVE id
     payload                 a harmless probe of the step the upatch guards
+    setup, teardown         install and remove the vulnerable software, when the test needs it
     README.md               what the probe does, what it needs, what each result means
 tools/
   check                     checks every entry's names, Beefile, license lines and evidence
@@ -64,10 +58,10 @@ tools/compile <shirudo-checkout>
 Build the package, copy the registry and the package to a shirudo test machine, and run as root:
 
 ```
-tools/test build/packages/<cve-id>-1.0.0.bee
+tools/test --setup build/packages/<cve-id>-1.0.0.bee
 ```
 
-It runs the entry's payload, loads the upatch, runs the payload again, unloads the upatch and runs it a third time. The upatch passes when the payload was blocked while it was loaded. Set `SHIRUDO` when the trusted runtime binary isn't `shirudo` on the path, and the payload's own settings as its README says.
+It runs the entry's `setup` when it has one, then its payload, loads the upatch, runs the payload again, unloads the upatch and runs it a third time. The upatch passes when the payload was blocked while it was loaded. Set `SHIRUDO` when the trusted runtime binary isn't `shirudo` on the path, and the payload's own settings as its README says.
 
 ## Contributing, security and license
 

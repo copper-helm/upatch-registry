@@ -2,6 +2,22 @@
 
 Each pull request adds or changes one upatch.
 
+## Choose a CVE
+
+A upatch works in the kernel, so it can stop an attack only at a step the kernel sees. Pick a CVE whose attack needs one of these steps, and that normal use of the software never needs:
+
+| The attack needs to | The upatch refuses |
+| --- | --- |
+| run a command or a program (command or code injection, deserialization that ends in a command) | `execve` by the vulnerable program's processes |
+| write a file (an upload, a partial PUT) | creating that file, by that program, in that place |
+| read a file outside what the program serves (path traversal) | opening it, by that program |
+| connect out (SSRF) | connecting from that program to internal addresses or the cloud metadata address |
+| reach a kernel bug through a socket family, protocol, ioctl or socket option | that entry point |
+| send a crafted request in plain text | dropping it in a `netfilter`, `cgroup_skb` or `xdp` program |
+| run a vulnerable function of a native program | a `uprobe` that ends the process on that path |
+
+A upatch can't stop cross-site scripting, cross-site request forgery, open redirects, or SQL injection and logic flaws that never leave the program's memory.
+
 ## Add a upatch
 
 1. Make the directory `upatches/<cve-id>/`, named by the CVE id in lowercase, such as `upatches/cve-2026-12345/`. One directory holds every upatch for that CVE, whether it is in the Linux kernel or in an application.
@@ -11,9 +27,9 @@ Each pull request adds or changes one upatch.
     - `<upatch>.bpf.c`: the BPF program.
     - `README.md`: the sections listed below.
     - `evidence/evidence.toml`: how you tested it, described below.
-4. Make the directory `payloads/<cve-id>/`, with the same CVE id, and add `payload` and `README.md`, described below.
+4. Make the directory `payloads/<cve-id>/`, with the same CVE id, and add `payload` and `README.md`. When the test needs software a test machine doesn't have, add `setup` and `teardown` too. All four are described below.
 5. Run `tools/check` and `tools/compile <shirudo-checkout>`.
-6. Build the package and run `tools/test` on a shirudo test machine, which runs the payload before, while and after the upatch is loaded. Record the result in `evidence/`.
+6. Build the package and run `tools/test --setup` on a shirudo test machine, which runs the payload before, while and after the upatch is loaded. Record the result in `evidence/`.
 
 ## Record the evidence
 
@@ -57,6 +73,7 @@ Only `evidence.toml` and the logs it lists may sit in `evidence/`. Media is link
 - Write CO-RE C against `vmlinux.h`. Never use a hard-coded struct offset: it signs fine and the verifier refuses it on another kernel.
 - Use only the [attach kinds](https://docs.shirudo.dev/upatches/write/attach-kinds.html) shirudo supports.
 - Refuse an operation in an `lsm` program by returning `-EPERM`, never with `fmod_ret`.
+- Refuse only what the vulnerable software does: match its processes by their executable or command name, and refuse only the one operation the attack needs. Never refuse running programs, opening files or connecting for any other process. A upatch that does can lock everyone out of the machine, root included, and shirudo loads it again after a reboot.
 - Test the cheapest condition first and return early. A upatch runs on every event of its hook, on every machine that loads it.
 - Start the file with `// SPDX-License-Identifier: GPL-2.0 OR BSD-2-Clause` and declare `char _license[] SEC("license") = "Dual BSD/GPL";`.
 - Never add exploit code, or anything that triggers the bug.
@@ -69,9 +86,11 @@ A payload is a probe, not an exploit. It takes the first step that the upatch gu
 - It prints one line and exits with `0` when it reached the guarded step, `10` when it was blocked, and `20` when the machine lacks the vulnerable feature. Any other status is an error.
 - It reads its settings, such as a server's address, from environment variables.
 - `README.md` names the CVE, says what the payload does and what it needs, and has a `## Results` section with the four results.
-- The directory holds only these two files.
+- `setup`, when the test needs software, installs and starts a vulnerable version of it: a pinned release from the project's own archive, checked against its published checksum, listening on 127.0.0.1 only. It prints the payload's settings as `KEY=value` lines on standard output, writes everything else to standard error, and exits with a non-zero status when a step fails.
+- `teardown` stops and removes everything `setup` installed, packages included, and exits with `0`.
+- The directory holds only `payload`, `README.md`, `setup` and `teardown`.
 
-`tools/test <cve-id>-<version>.bee` runs as root on a shirudo test machine. For each package it runs the payload, loads the package's upatches, runs it again, unloads them and runs it a third time. It passes when the payload was blocked while the upatches were loaded, and the runs before and after give the same result.
+`tools/test --setup <cve-id>-<version>.bee` runs as root on a shirudo test machine. For each package it runs `setup`, then the payload, loads the package's upatches, runs it again, unloads them and runs it a third time. It passes when the payload was blocked while the upatches were loaded, and the runs before and after give the same result. It runs `teardown` at the end, whatever the result.
 
 ## Write the README
 
