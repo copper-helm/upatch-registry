@@ -16,6 +16,11 @@ on:
   pull_request_target:
     types: [opened, reopened, synchronize, labeled, unlabeled, closed]
     paths: ["upatches/**"]
+  # When CI finishes on a pull request, its result belongs on the entry's timeline. The PR
+  # event above fired while CI was still running, so ask again once it is done.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
   schedule:
     - cron: "17 5 * * *"
   workflow_dispatch:
@@ -30,12 +35,19 @@ concurrency:
 
 jobs:
   ingest:
-    # Same rule as the site: PRs from forks only count once they carry show-on-site.
+    # Same rule as the site: PRs from forks only count once they carry show-on-site. A
+    # finished CI run only matters for a pull request (a merged entry already has its PR's
+    # CI); the site itself decides which PRs to show, so a fork's CI run costs one quick call.
     if: >-
-      github.event_name != 'pull_request_target' ||
-      github.event.pull_request.head.repo.full_name == github.repository ||
-      contains(github.event.pull_request.labels.*.name, 'show-on-site') ||
-      (github.event.action == 'unlabeled' && github.event.label.name == 'show-on-site')
+      (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.event == 'pull_request' &&
+        github.event.workflow_run.conclusion != 'cancelled' &&
+        github.event.workflow_run.conclusion != 'skipped') ||
+      (github.event_name != 'workflow_run' && (
+        github.event_name != 'pull_request_target' ||
+        github.event.pull_request.head.repo.full_name == github.repository ||
+        contains(github.event.pull_request.labels.*.name, 'show-on-site') ||
+        (github.event.action == 'unlabeled' && github.event.label.name == 'show-on-site')))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
