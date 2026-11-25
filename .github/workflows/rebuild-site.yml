@@ -1,4 +1,14 @@
-name: Rebuild upatch.dev
+name: Update upatch.dev
+
+# Asks upatch.dev to read the registry again. The site renders only the entries that
+# changed, updates its database and revalidates the pages of the CVEs they touch, so a
+# change shows on upatch.dev within seconds, without a deploy.
+#
+# The request carries no registry content: the site reads everything from GitHub itself.
+# Secrets:
+#   UPATCH_INGEST_SECRET       the site's INGEST_SECRET (bearer token for /api/ingest)
+#   UPATCH_PROTECTION_BYPASS   upatch-dev's "Protection Bypass for Automation" secret,
+#                              which lets this request past the Vercel login
 
 on:
   push:
@@ -12,35 +22,45 @@ on:
 
 permissions: {}
 
+# One call at a time. A call that arrives while the site is still ingesting is queued on
+# the site too, so nothing is lost by letting the newest call wait here.
 concurrency:
   group: rebuild-site
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  rebuild:
+  ingest:
+    # Same rule as the site: PRs from forks only count once they carry show-on-site.
     if: >-
       github.event_name != 'pull_request_target' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
       contains(github.event.pull_request.labels.*.name, 'show-on-site') ||
       (github.event.action == 'unlabeled' && github.event.label.name == 'show-on-site')
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - name: Call the Vercel deploy hooks
+      - name: Ask upatch.dev to ingest the registry
         env:
-          SITE_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK_UPATCH_DEV }}
-          FEEDBACK_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK_UPATCH_FEEDBACK }}
+          INGEST_SECRET: ${{ secrets.UPATCH_INGEST_SECRET }}
+          BYPASS: ${{ secrets.UPATCH_PROTECTION_BYPASS }}
         run: |
-          failed=0
-          for pair in "upatch-dev:$SITE_HOOK" "upatch-feedback:$FEEDBACK_HOOK"; do
-            name=${pair%%:*}
-            hook=${pair#*:}
-            if [ -z "$hook" ]; then
-              echo "::warning::No deploy hook secret for $name, so it was not rebuilt."
-            elif curl -fsS -X POST -o /dev/null "$hook"; then
-              echo "Rebuilt $name."
-            else
-              echo "::error::The deploy hook of $name failed."
-              failed=1
+          if [ -z "$INGEST_SECRET" ] || [ -z "$BYPASS" ]; then
+            echo "::warning::UPATCH_INGEST_SECRET or UPATCH_PROTECTION_BYPASS is not set, so upatch.dev was not updated."
+            exit 0
+          fi
+          # A run that runs out of time leaves the rest for the next one: call again, up to 3 times.
+          for attempt in 1 2 3; do
+            status=$(curl -sS -o response.json -w '%{http_code}' --max-time 320 -X POST \
+              -H "Authorization: Bearer $INGEST_SECRET" \
+              -H "x-vercel-protection-bypass: $BYPASS" \
+              https://upatch.dev/api/ingest) || status=000
+            if [ "$status" != "200" ]; then
+              echo "::error::upatch.dev answered HTTP $status to the ingest request."
+              head -c 500 response.json 2>/dev/null; echo
+              exit 1
             fi
+            jq -r '"Changed: \(.changed | length) CVEs \(.changed | join(" "))\nQueued behind a running ingest: \(.queued)\nFinished everything: \(.complete)"' response.json
+            if [ "$(jq -r '.complete or .queued' response.json)" = "true" ]; then exit 0; fi
+            echo "The ingest ran out of time; calling again."
           done
-          exit "$failed"
+          echo "::warning::The ingest still had work left after 3 calls; the site's daily cron finishes it."
