@@ -4,11 +4,11 @@ Each pull request adds or changes one upatch.
 
 ## Add a upatch
 
-1. Pick the category. A Linux kernel CVE goes in `upatches/kernel-cve/`, a CVE in an application, mitigated at kernel hooks, in `upatches/app-cve/`.
-2. Name the entry: lowercase letters, digits and hyphens, at most 30 characters. A kernel-cve or app-cve entry starts with its CVE id, such as `cve-2026-12345-foo-block`. The directory, the package, the source file's base name and the tree id all use this name.
+1. Make the directory `upatches/<cve-id>/`, named by the CVE id in lowercase, such as `upatches/cve-2026-12345/`. One directory holds every upatch for that CVE, whether it is in the Linux kernel or in an application.
+2. Name each upatch after the CVE: the CVE id, then a hyphen and what it does, such as `cve-2026-12345-foo-block`, in lowercase letters, digits and hyphens. The source file's base name and the tree id use the upatch's name. The package uses the CVE id.
 3. Add these files:
-    - `Beefile`: `[package]` with `name`, `description` and `license = "GPL-2.0 OR BSD-2-Clause"`, one `[[upatches]]` with `source = "<name>.bpf.c"`, and `[upatches.tree]` with `id = "<name>"` and `fixes = ["CVE-YYYY-NNNNN"]`.
-    - `<name>.bpf.c`: the BPF program.
+    - `Beefile`: `[package]` with `name = "<cve-id>"`, `description` and `license = "GPL-2.0 OR BSD-2-Clause"`, then for each upatch an `[[upatches]]` with `source = "<upatch>.bpf.c"` and an `[upatches.tree]` with `id = "<upatch>"` and `fixes = ["CVE-YYYY-NNNNN"]`.
+    - `<upatch>.bpf.c`: the BPF program.
     - `README.md`: the sections listed below.
     - `evidence/evidence.toml`: how you tested it, described below.
 4. Run `tools/check` and `tools/compile <shirudo-checkout>`.
