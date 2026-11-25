@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: BSD-2-Clause
+
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+shirudo=${SHIRUDO:-shirudo}
+
+die()
+{
+	printf 'test: %s\n' "$*" >&2
+	exit 1
+}
+
+[ $# -ge 1 ] || die "usage: tools/test <cve-id>-<version>.bee..."
+[ "$(id -u)" -eq 0 ] || die "run it as root on a shirudo test machine"
+command -v "$shirudo" >/dev/null || die "no $shirudo: set SHIRUDO to the trusted runtime binary"
+
+stage=$(mktemp -d)
+loaded=()
+
+unload_all()
+{
+	local i
+	for ((i = ${#loaded[@]} - 1; i >= 0; i--)); do
+		"$shirudo" upatch unload "${loaded[i]}" >>"$stage/shirudo.log" 2>&1 ||
+			printf 'test: could not unload %s, see %s\n' "${loaded[i]}" "$stage/shirudo.log" >&2
+	done
+	loaded=()
+}
+
+cleanup()
+{
+	unload_all
+	rm -rf -- "$stage"
+}
+trap cleanup EXIT
+
+probe()
+{
+	local state=$1 payload=$2 output status=0
+	output=$("$payload" 2>&1) || status=$?
+	case $status in
+	0) result=reached ;;
+	10) result=blocked ;;
+	20) result=unsupported ;;
+	*) result=error ;;
+	esac
+	output=${output%%$'\n'*}
+	printf '  %-7s %-12s %s\n' "$state" "$result" "${output#"$result: "}"
+}
+
+test_package()
+{
+	local bee=$1 file cve payload dir upatch before during after
+	local -a upatches
+	file=$(basename "$bee")
+	[[ "$file" =~ ^(cve-[0-9]{4}-[0-9]{4,})-[0-9]+\.[0-9]+\.[0-9]+\.bee$ ]] ||
+		die "$file is not named <cve-id>-<version>.bee"
+	cve=${BASH_REMATCH[1]}
+	payload=$root/payloads/$cve/payload
+	[ -x "$payload" ] || die "$cve has no payload at $payload"
+	dir=$stage/$cve
+	mkdir -p "$dir"
+	tar -xzf "$bee" -C "$dir"
+	mapfile -t upatches < <(find "$dir" -path '*/upatches/*.upatch' ! -name '*.unload.upatch' | sort)
+	[ ${#upatches[@]} -gt 0 ] || die "$file holds no upatch"
+
+	printf '%s\n' "$cve"
+	probe before "$payload"
+	before=$result
+	for upatch in "${upatches[@]}"; do
+		if ! "$shirudo" upatch load "$upatch" >>"$stage/shirudo.log" 2>&1; then
+			printf '  FAIL: could not load %s: %s\n' "$(basename "$upatch")" "$(tail -n 1 "$stage/shirudo.log")"
+			unload_all
+			return 1
+		fi
+		loaded+=("${upatch%.upatch}.unload.upatch")
+	done
+	probe loaded "$payload"
+	during=$result
+	unload_all
+	probe after "$payload"
+	after=$result
+
+	if [ "$during" != blocked ]; then
+		printf '  FAIL: the payload was not blocked while the upatch was loaded\n'
+		return 1
+	fi
+	if [ "$before" != "$after" ] || [ "$before" = blocked ] || [ "$before" = error ]; then
+		printf '  FAIL: before and after should match and be reached or unsupported\n'
+		return 1
+	fi
+	if [ "$before" = unsupported ]; then
+		printf '  PASS: blocked while loaded; this machine lacks the vulnerable feature, so only the refusal was shown\n'
+	else
+		printf '  PASS: reached before, blocked while loaded, reached again after\n'
+	fi
+}
+
+failed=0
+for bee in "$@"; do
+	[ -r "$bee" ] || die "no package at $bee"
+	test_package "$bee" || failed=1
+done
+exit "$failed"

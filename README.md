@@ -20,10 +20,15 @@ upatches/
     <cve-id>-<what>.bpf.c   a BPF program, such as cve-2026-99350-rxrpc-block.bpf.c
     README.md               the vulnerability, what the upatch blocks, side effects, sources
     evidence/               evidence.toml: how it was tested and what it showed, plus small logs
+payloads/
+  <cve-id>/                 the same CVE id
+    payload                 a harmless probe of the step the upatch guards
+    README.md               what the probe does, what it needs, what each result means
 tools/
   check                     checks every entry's names, Beefile, license lines and evidence
   compile                   compiles every entry with clang 23 and the flags shirudo uses
   build                     builds and signs packages with your shirudo key
+  test                      runs each payload before, while and after its upatch is loaded
 ```
 
 ## Use a upatch
@@ -53,6 +58,16 @@ tools/compile <shirudo-checkout>
 ```
 
 `tools/compile` needs clang 23. CI runs both on every pull request.
+
+## Test an entry on a machine
+
+Build the package, copy the registry and the package to a shirudo test machine, and run as root:
+
+```
+tools/test build/packages/<cve-id>-1.0.0.bee
+```
+
+It runs the entry's payload, loads the upatch, runs the payload again, unloads the upatch and runs it a third time. The upatch passes when the payload was blocked while it was loaded. Set `SHIRUDO` when the trusted runtime binary isn't `shirudo` on the path, and the payload's own settings as its README says.
 
 ## Contributing, security and license
 
